@@ -1,0 +1,45 @@
+@startuml
+title Diagrama de Implantacao e Contencao de Recursos (Tema 10 - Questoes de Hardware)
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+node "Host Fisico / Sistema Operacional" {
+    artifact "CPU Fisica (Multi-core)" as CPU
+    artifact "Memoria RAM Fisica" as RAM
+    artifact "Armazenamento SSD / Disco" as DISK
+
+    node "Conteiner Docker (Linux Namespaces + cgroups)" as Docker {
+        note right of Docker
+            Limites impostos pelo cgroups:
+            - Perfil A: 0.25 vCPU | 256 MB RAM
+            - Perfil B: 0.50 vCPU | 512 MB RAM
+            - Perfil C: 2.00 vCPUs | 1024 MB RAM
+        end note
+
+        node "JVM 17 (-XX:+UseG1GC -XX:MaxRAMPercentage=75.0)" as JVM {
+            component "Tomcat Thread Pool" as Tomcat
+            component "Spring Boot (MVC + DI Singleton)" as App {
+                [VeiculoController / MovimentacaoController] --> [VeiculoService / MovimentacaoService]
+                [VeiculoService / MovimentacaoService] --> [CalculoTarifaStrategy]
+                [VeiculoService / MovimentacaoService] --> [VeiculoRepository / MovimentacaoRepository]
+            }
+            component "HikariCP Connection Pool" as Hikari
+            component "G1 Garbage Collector (Heap / Metaspace)" as GC
+
+            Tomcat --> App
+            [VeiculoRepository / MovimentacaoRepository] --> Hikari
+        }
+
+        database "H2 Embedded (/app/data/garagemdb)" as H2
+        Hikari --> H2 : JDBC I/O
+    }
+
+    Docker ..> CPU : Escalonador CFS (CPU Quota / Throttling)
+    Docker ..> RAM : Limite RSS / OOM Killer
+    H2 ..> DISK : Leitura e Escrita Persistente
+}
+
+actor "Benchmark Runner (run_benchmark.py)" as Bench
+Bench --> Tomcat : Requisicoes HTTP Concorrentes (REST/JSON)
+@enduml
